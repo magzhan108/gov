@@ -3,16 +3,51 @@
    ========================================== */
 
 // ==========================================
-// Storage
+// Firebase Setup
+// ==========================================
+const firebaseConfig = {
+  apiKey: "AIzaSyBvUYswzoC6agkm6YLcIJONNkt1WqSKD-0",
+  authDomain: "gova-8d7a4.firebaseapp.com",
+  projectId: "gova-8d7a4",
+  storageBucket: "gova-8d7a4.firebasestorage.app",
+  messagingSenderId: "119904820189",
+  appId: "1:119904820189:web:078c9466c91d56a55c3434",
+  measurementId: "G-B5T2TVBK7W"
+};
+
+let db = null;
+try {
+    if (typeof firebase !== 'undefined') {
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.firestore();
+    }
+} catch (e) {
+    console.error('Firebase initialization error:', e);
+}
+
+// ==========================================
+// Storage & State
 // ==========================================
 const KEYS = { users: 'gov_users', posts: 'gov_posts', session: 'gov_session' };
 
 function load(k) { try { return JSON.parse(localStorage.getItem(k)) || null; } catch { return null; } }
 function save(k, d) { localStorage.setItem(k, JSON.stringify(d)); }
-function getUsers() { return load(KEYS.users) || []; }
-function saveUsers(u) { save(KEYS.users, u); }
-function getPosts() { return load(KEYS.posts) || []; }
-function savePosts(p) { save(KEYS.posts, p); }
+
+let appUsers = load(KEYS.users) || [];
+let appPosts = load(KEYS.posts) || [];
+
+function getUsers() { return appUsers; }
+function saveUsers(u) {
+    appUsers = u;
+    save(KEYS.users, u);
+}
+
+function getPosts() { return appPosts; }
+function savePosts(p) {
+    appPosts = p;
+    save(KEYS.posts, p);
+}
+
 function getSession() { return load(KEYS.session); }
 function saveSession(s) { save(KEYS.session, s); }
 function clearSession() { localStorage.removeItem(KEYS.session); }
@@ -65,63 +100,111 @@ let viewData = {};
 function navigate(view, data = {}) { currentView = view; viewData = data; render(); window.scrollTo(0, 0); }
 
 // ==========================================
-// Seed
+// Seed Data
 // ==========================================
-function seedIfEmpty() {
+const initialSeedPosts = [
+    {
+        id: 'seed_1', userId: 'admin_root', author: 'Әкімшілік', category: 'news',
+        title: 'Цифрлық қызметтер порталы жаңартылды',
+        content: 'Азаматтарға арналған цифрлық қызметтер порталы толығымен жаңартылды. Жаңа нұсқада 50-ден астам мемлекеттік қызмет онлайн форматта қол жетімді болады.\n\nЖаңартылған портал арқылы азаматтар құжаттарды электронды түрде тапсыра алады, өтініштердің мәртебесін бақылай алады және хабарламалар ала алады.\n\nПортал 2026 жылдың 1 қарашасынан бастап толық көлемде жұмыс істейді.',
+        comments: [
+            { id: 'c1', userId: 'g1', author: 'Асқар Нұрланов', text: 'Өте жақсы жаңалық! Сұрақ: ескі аккаунттар сақтала ма?', createdAt: new Date(Date.now() - 7200000).toISOString() },
+            { id: 'c2', userId: 'g2', author: 'Гүлнәр Сериқова', text: 'Мобильді қосымша да жаңартыла ма?', createdAt: new Date(Date.now() - 3600000).toISOString() }
+        ],
+        createdAt: new Date(Date.now() - 3600000 * 2).toISOString()
+    },
+    {
+        id: 'seed_2', userId: 'admin_root', author: 'Әкімшілік', category: 'decree',
+        title: 'Жаңа нормативтік-құқықтық акт қабылданды',
+        content: 'Мемлекеттік қызметтерді көрсету тәртібіне өзгерістер енгізу туралы жаңа нормативтік-құқықтық акт қабылданды.\n\nНегізгі өзгерістер:\n- Құжаттарды қарау мерзімі 30 күнге дейін қысқартылды\n- Электронды өтініштер басымдықпен қарастырылады\n- Жаңа шағымдану тетігі енгізілді\n\nАкт 2026 жылдың 15 қарашасынан күшіне енеді.',
+        comments: [],
+        createdAt: new Date(Date.now() - 3600000 * 24).toISOString()
+    },
+    {
+        id: 'seed_3', userId: 'admin_root', author: 'Әкімшілік', category: 'event',
+        title: 'Халықпен кездесу — 5 қараша',
+        content: 'Құрметті азаматтар!\n\nМемлекеттік орган басшысының халықпен кездесуі 2026 жылдың 5 қарашасында, сағат 10:00-де өтеді.\n\nОрын: Мемлекеттік қызмет көрсету орталығы, үлкен зал.\n\nКүн тәртібі:\n- Атқарылған жұмыстар туралы есеп\n- Азаматтардың сұрақтарына жауап\n- Келешек жоспарлар\n\nБарлығын қатысуға шақырамыз!',
+        comments: [
+            { id: 'c3', userId: 'g3', author: 'Марат Қасымов', text: 'Онлайн трансляция болады ма?', createdAt: new Date(Date.now() - 43200000).toISOString() }
+        ],
+        createdAt: new Date(Date.now() - 3600000 * 48).toISOString()
+    },
+    {
+        id: 'seed_4', userId: 'admin_root', author: 'Әкімшілік', category: 'announce',
+        title: 'Бос лауазымдық орындарға конкурс жарияланды',
+        content: 'Мемлекеттік органда бос лауазымдық орындарға конкурс жарияланады:\n\n1. Бас маман — 2 орын\n2. Жетекші маман — 3 орын\n3. Кеңесші — 1 орын\n\nТалаптар: жоғары білім, мемлекеттік тілді білу, компьютерлік сауаттылық.\n\nҚұжат қабылдау мерзімі: 2026 жылдың 1-15 қарашасы.\n\nТолық ақпарат: hr@gov.kz',
+        comments: [],
+        createdAt: new Date(Date.now() - 3600000 * 72).toISOString()
+    },
+    {
+        id: 'seed_5', userId: 'admin_root', author: 'Әкімшілік', category: 'press',
+        title: 'Баспасөз мәлімдемесі: Аймақ дамуының қорытындысы',
+        content: 'Биылғы жылдың 9 айында аймақ дамуында оңтайлы нәтижелер тіркелді:\n\n- Жалпы өңірлік өнім 8,5%-ға өсті\n- 1200 жаңа жұмыс орны құрылды\n- 15 инвестициялық жоба іске қосылды\n- Орташа жалақы 15%-ға артты\n\nМемлекеттік орган аймақ экономикасын дамыту бағытында жұмысын жалғастыруда.',
+        comments: [
+            { id: 'c4', userId: 'g4', author: 'Алия Бекмұратова', text: 'Толық статистикалық деректерді қайдан көруге болады?', createdAt: new Date(Date.now() - 86400000).toISOString() }
+        ],
+        createdAt: new Date(Date.now() - 3600000 * 120).toISOString()
+    }
+];
+
+function seedLocalIfEmpty() {
     let users = getUsers();
     if (!users.find(u => u.email === 'admin@admin.com')) {
-        users.push({ id: uid(), name: 'Әкімшілік', email: 'admin@admin.com', password: 'admin123', role: 'admin', createdAt: new Date().toISOString() });
+        users.push({ id: 'admin_root', name: 'Әкімшілік', email: 'admin@admin.com', password: 'admin123', role: 'admin', createdAt: new Date().toISOString() });
         saveUsers(users);
     }
-
     if (getPosts().length === 0) {
-        const admin = getUsers().find(u => u.role === 'admin');
-        const posts = [
-            {
-                id: uid(), userId: admin.id, author: admin.name, category: 'news',
-                title: 'Цифрлық қызметтер порталы жаңартылды',
-                content: 'Азаматтарға арналған цифрлық қызметтер порталы толығымен жаңартылды. Жаңа нұсқада 50-ден астам мемлекеттік қызмет онлайн форматта қол жетімді болады.\n\nЖаңартылған портал арқылы азаматтар құжаттарды электронды түрде тапсыра алады, өтініштердің мәртебесін бақылай алады және хабарламалар ала алады.\n\nПортал 2026 жылдың 1 қарашасынан бастап толық көлемде жұмыс істейді.',
-                comments: [
-                    { id: uid(), userId: 'g1', author: 'Асқар Нұрланов', text: 'Өте жақсы жаңалық! Сұрақ: ескі аккаунттар сақтала ма?', createdAt: new Date(Date.now() - 7200000).toISOString() },
-                    { id: uid(), userId: 'g2', author: 'Гүлнәр Сериқова', text: 'Мобильді қосымша да жаңартыла ма?', createdAt: new Date(Date.now() - 3600000).toISOString() }
-                ],
-                createdAt: new Date(Date.now() - 3600000 * 2).toISOString()
-            },
-            {
-                id: uid(), userId: admin.id, author: admin.name, category: 'decree',
-                title: 'Жаңа нормативтік-құқықтық акт қабылданды',
-                content: 'Мемлекеттік қызметтерді көрсету тәртібіне өзгерістер енгізу туралы жаңа нормативтік-құқықтық акт қабылданды.\n\nНегізгі өзгерістер:\n- Құжаттарды қарау мерзімі 30 күнге дейін қысқартылды\n- Электронды өтініштер басымдықпен қарастырылады\n- Жаңа шағымдану тетігі енгізілді\n\nАкт 2026 жылдың 15 қарашасынан күшіне енеді.',
-                comments: [],
-                createdAt: new Date(Date.now() - 3600000 * 24).toISOString()
-            },
-            {
-                id: uid(), userId: admin.id, author: admin.name, category: 'event',
-                title: 'Халықпен кездесу — 5 қараша',
-                content: 'Құрметті азаматтар!\n\nМемлекеттік орган басшысының халықпен кездесуі 2026 жылдың 5 қарашасында, сағат 10:00-де өтеді.\n\nОрын: Мемлекеттік қызмет көрсету орталығы, үлкен зал.\n\nКүн тәртібі:\n- Атқарылған жұмыстар туралы есеп\n- Азаматтардың сұрақтарына жауап\n- Келешек жоспарлар\n\nБарлығын қатысуға шақырамыз!',
-                comments: [
-                    { id: uid(), userId: 'g3', author: 'Марат Қасымов', text: 'Онлайн трансляция болады ма?', createdAt: new Date(Date.now() - 43200000).toISOString() }
-                ],
-                createdAt: new Date(Date.now() - 3600000 * 48).toISOString()
-            },
-            {
-                id: uid(), userId: admin.id, author: admin.name, category: 'announce',
-                title: 'Бос лауазымдық орындарға конкурс жарияланды',
-                content: 'Мемлекеттік органда бос лауазымдық орындарға конкурс жарияланады:\n\n1. Бас маман — 2 орын\n2. Жетекші маман — 3 орын\n3. Кеңесші — 1 орын\n\nТалаптар: жоғары білім, мемлекеттік тілді білу, компьютерлік сауаттылық.\n\nҚұжат қабылдау мерзімі: 2026 жылдың 1-15 қарашасы.\n\nТолық ақпарат: hr@gov.kz',
-                comments: [],
-                createdAt: new Date(Date.now() - 3600000 * 72).toISOString()
-            },
-            {
-                id: uid(), userId: admin.id, author: admin.name, category: 'press',
-                title: 'Баспасөз мәлімдемесі: Аймақ дамуының қорытындысы',
-                content: 'Биылғы жылдың 9 айында аймақ дамуында оңтайлы нәтижелер тіркелді:\n\n- Жалпы өңірлік өнім 8,5%-ға өсті\n- 1200 жаңа жұмыс орны құрылды\n- 15 инвестициялық жоба іске қосылды\n- Орташа жалақы 15%-ға артты\n\nМемлекеттік орган аймақ экономикасын дамыту бағытында жұмысын жалғастыруда.',
-                comments: [
-                    { id: uid(), userId: 'g4', author: 'Алия Бекмұратова', text: 'Толық статистикалық деректерді қайдан көруге болады?', createdAt: new Date(Date.now() - 86400000).toISOString() }
-                ],
-                createdAt: new Date(Date.now() - 3600000 * 120).toISOString()
-            }
-        ];
-        savePosts(posts);
+        savePosts(initialSeedPosts);
     }
+}
+
+// ==========================================
+// Firebase Real-time Synchronization
+// ==========================================
+function initFirebaseSync() {
+    if (!db) return;
+
+    // 1. Sync users
+    db.collection('users').onSnapshot(snapshot => {
+        if (!snapshot.empty) {
+            const list = [];
+            snapshot.forEach(doc => list.push(doc.data()));
+            saveUsers(list);
+            renderTopBar();
+            renderNav();
+            if (currentView === 'admin') render();
+        } else {
+            // First time setup: seed admin to Firestore
+            const adminUser = {
+                id: 'admin_root',
+                name: 'Әкімшілік',
+                email: 'admin@admin.com',
+                password: 'admin123',
+                role: 'admin',
+                createdAt: new Date().toISOString()
+            };
+            db.collection('users').doc('admin_root').set(adminUser).catch(console.error);
+        }
+    }, err => console.warn('Firestore users error:', err));
+
+    // 2. Sync posts
+    db.collection('posts').onSnapshot(snapshot => {
+        if (!snapshot.empty) {
+            const list = [];
+            snapshot.forEach(doc => list.push(doc.data()));
+            savePosts(list);
+            if (currentView === 'home') {
+                renderNewsCards(currentFilter, currentSearch);
+            } else if (currentView === 'admin' || currentView === 'post') {
+                render();
+            }
+        } else {
+            // First time setup: seed posts to Firestore
+            initialSeedPosts.forEach(p => {
+                db.collection('posts').doc(p.id).set(p).catch(console.error);
+            });
+        }
+    }, err => console.warn('Firestore posts error:', err));
 }
 
 // ==========================================
@@ -509,6 +592,9 @@ function handleRegister(e) {
     const u = { id: uid(), name, email, password: pass, role: 'user', createdAt: new Date().toISOString() };
     users.push(u);
     saveUsers(users);
+    if (db) {
+        db.collection('users').doc(u.id).set(u).catch(console.error);
+    }
     saveSession({ userId: u.id });
     toast('Тіркелу сәтті аяқталды!', 'success');
     navigate('home');
@@ -539,8 +625,12 @@ function handleNewPost(e) {
     const content = document.getElementById('npContent').value.trim();
     if (!title || !cat || !content) return;
     const posts = getPosts();
-    posts.push({ id: uid(), userId: user.id, author: user.name, title, category: cat, content, comments: [], createdAt: new Date().toISOString() });
+    const newPost = { id: uid(), userId: user.id, author: user.name, title, category: cat, content, comments: [], createdAt: new Date().toISOString() };
+    posts.unshift(newPost);
     savePosts(posts);
+    if (db) {
+        db.collection('posts').doc(newPost.id).set(newPost).catch(console.error);
+    }
     closeNewPost();
     toast('Жаңалық жарияланды!', 'success');
     navigate('home');
@@ -556,8 +646,12 @@ function handleComment(e) {
     const post = posts.find(p => p.id === viewData.id);
     if (!post) return;
     if (!post.comments) post.comments = [];
-    post.comments.push({ id: uid(), userId: user.id, author: user.name, text, createdAt: new Date().toISOString() });
+    const newComment = { id: uid(), userId: user.id, author: user.name, text, createdAt: new Date().toISOString() };
+    post.comments.push(newComment);
     savePosts(posts);
+    if (db) {
+        db.collection('posts').doc(post.id).update({ comments: post.comments }).catch(console.error);
+    }
     toast('Пікір қосылды!', 'success');
     navigate('post', { id: viewData.id });
 }
@@ -565,6 +659,9 @@ function handleComment(e) {
 function deletePost(id) {
     if (!confirm('Бұл жаңалықты жойғыңыз келе ме?')) return;
     savePosts(getPosts().filter(p => p.id !== id));
+    if (db) {
+        db.collection('posts').doc(id).delete().catch(console.error);
+    }
     toast('Жаңалық жойылды', 'info');
     if (currentView === 'post') navigate('home'); else render();
 }
@@ -576,6 +673,9 @@ function deleteComment(postId, commentId) {
     if (!post) return;
     post.comments = (post.comments || []).filter(c => c.id !== commentId);
     savePosts(posts);
+    if (db) {
+        db.collection('posts').doc(postId).update({ comments: post.comments }).catch(console.error);
+    }
     toast('Пікір жойылды', 'info');
     navigate('post', { id: postId });
 }
@@ -584,6 +684,9 @@ function deleteUser(userId) {
     if (!confirm('Қолданушыны жойғыңыз келе ме?')) return;
     saveUsers(getUsers().filter(u => u.id !== userId));
     savePosts(getPosts().filter(p => p.userId !== userId));
+    if (db) {
+        db.collection('users').doc(userId).delete().catch(console.error);
+    }
     toast('Қолданушы жойылды', 'info');
     render();
 }
@@ -637,5 +740,6 @@ function toast(msg, type = 'info') {
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeNewPost(); });
 
 // Init
-seedIfEmpty();
+seedLocalIfEmpty();
 render();
+initFirebaseSync();
