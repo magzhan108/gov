@@ -1035,6 +1035,15 @@ select.form-input {
     .footer-inner { flex-direction: column; text-align: center; }
     .footer-right { text-align: center; }
     .header-nav { gap: 2px; }
+   /* Netlify белгішесін жасыру */
+iframe[title*="Netlify"], 
+[id*="netlify-drawer"], 
+netlify-drawer,
+.netlify-drawer {
+    display: none !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
     .nav-link { padding: 6px 10px; font-size: 0.75rem; }
     .nav-btn { padding: 6px 12px; font-size: 0.75rem; }
     .logo-subtitle { display: none; }
