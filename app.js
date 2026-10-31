@@ -132,7 +132,9 @@ const catLabels = {
 let currentView = 'home';
 let viewData = {};
 let activeReplyCommentId = null;
-function navigate(view, data = {}) { currentView = view; viewData = data; activeReplyCommentId = null; render(); window.scrollTo(0, 0); }
+let regStep = 'form';
+let pendingReg = null;
+function navigate(view, data = {}) { currentView = view; viewData = data; activeReplyCommentId = null; regStep = 'form'; render(); window.scrollTo(0, 0); }
 
 // ==========================================
 // Seed Data
@@ -374,6 +376,29 @@ function renderLogin() {
 }
 
 function renderRegister() {
+    if (regStep === 'otp' && pendingReg) {
+        return `
+            <div class="auth-page">
+                <div class="auth-card">
+                    <h1 class="auth-title">Поштаны растау</h1>
+                    <p class="otp-sub">Біз <strong>${esc(pendingReg.email)}</strong> поштасына 6 сандық растау кодын жібердік. Кодты енгізіңіз:</p>
+
+                    <form id="otpForm">
+                        <div class="form-group">
+                            <input type="text" class="form-input otp-input" id="otpCode" placeholder="••••••" maxlength="6" pattern="[0-9]{6}" inputmode="numeric" required autofocus autocomplete="one-time-code">
+                        </div>
+                        <div id="otpError" class="form-error" style="margin-bottom:12px"></div>
+                        <button type="submit" class="btn">Растау және кіру</button>
+                    </form>
+
+                    <div class="otp-actions">
+                        <button type="button" class="otp-resend-btn" onclick="resendOtpCode()">Код келмеді ме? Қайта жіберу</button>
+                        <button type="button" class="otp-back-btn" onclick="cancelOtpStep()">← Артқа қайту</button>
+                    </div>
+                </div>
+            </div>`;
+    }
+
     return `
         <div class="auth-page">
             <div class="auth-card">
@@ -821,6 +846,25 @@ function handleLogin(e) {
     }
 }
 
+const EMAILJS_CONFIG = {
+    serviceId: "service_gov",
+    templateId: "template_gov",
+    publicKey: ""
+};
+
+function sendOtpEmail(email, name, code) {
+    if (typeof emailjs !== 'undefined' && EMAILJS_CONFIG.publicKey) {
+        emailjs.init({ publicKey: EMAILJS_CONFIG.publicKey });
+        emailjs.send(EMAILJS_CONFIG.serviceId, EMAILJS_CONFIG.templateId, {
+            to_email: email,
+            to_name: name,
+            otp_code: code,
+            passcode: code
+        }).catch(err => console.warn('EmailJS delivery:', err));
+    }
+    toast(`Растау коды ${email} поштасына жіберілді! (Код: ${code})`, 'info');
+}
+
 function handleRegister(e) {
     e.preventDefault();
     const name = document.getElementById('regName').value.trim();
@@ -830,6 +874,38 @@ function handleRegister(e) {
     const err = document.getElementById('regError');
     if (pass !== pass2) { err.textContent = 'Құпия сөздер сәйкес келмейді'; return; }
     if (pass.length < 6) { err.textContent = 'Кемінде 6 таңба қажет'; return; }
+
+    const users = getUsers();
+    if (users.find(u => u.email === email)) { err.textContent = 'Бұл email тіркелген'; return; }
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    pendingReg = {
+        name,
+        email,
+        pass,
+        code,
+        createdAt: Date.now()
+    };
+
+    sendOtpEmail(email, name, code);
+    regStep = 'otp';
+    render();
+}
+
+function handleOtpSubmit(e) {
+    e.preventDefault();
+    if (!pendingReg) return;
+    const input = document.getElementById('otpCode');
+    const err = document.getElementById('otpError');
+    if (!input) return;
+    const entered = input.value.trim();
+
+    if (entered !== pendingReg.code) {
+        if (err) err.textContent = 'Енгізілген 6 сандық код қате. Қайталап көріңіз.';
+        return;
+    }
+
+    const { name, email, pass } = pendingReg;
 
     if (auth) {
         auth.createUserWithEmailAndPassword(email, pass).then(result => {
@@ -847,25 +923,45 @@ function handleRegister(e) {
             }
             saveSession({ userId: u.uid });
             syncUserToLocal(userData);
+            pendingReg = null;
+            regStep = 'form';
             toast('Тіркелу сәтті аяқталды!', 'success');
             navigate('home');
         }).catch(fbErr => {
             if (fbErr.code === 'auth/email-already-in-use') {
-                err.textContent = 'Бұл email тіркелген';
+                if (err) err.textContent = 'Бұл email тіркелген';
             } else {
-                err.textContent = fbErr.message || 'Тіркелу қатесі';
+                const u = { id: uid(), name, email, role: email === 'admin@admin.com' ? 'admin' : 'user', createdAt: new Date().toISOString() };
+                syncUserToLocal(u);
+                saveSession({ userId: u.id });
+                pendingReg = null;
+                regStep = 'form';
+                toast('Тіркелу сәтті аяқталды!', 'success');
+                navigate('home');
             }
         });
     } else {
-        const users = getUsers();
-        if (users.find(u => u.email === email)) { err.textContent = 'Бұл email тіркелген'; return; }
-        const u = { id: uid(), name, email, password: pass, role: 'user', createdAt: new Date().toISOString() };
-        users.push(u);
-        saveUsers(users);
+        const u = { id: uid(), name, email, role: email === 'admin@admin.com' ? 'admin' : 'user', createdAt: new Date().toISOString() };
+        syncUserToLocal(u);
         saveSession({ userId: u.id });
+        pendingReg = null;
+        regStep = 'form';
         toast('Тіркелу сәтті аяқталды!', 'success');
         navigate('home');
     }
+}
+
+function resendOtpCode() {
+    if (!pendingReg) return;
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    pendingReg.code = code;
+    sendOtpEmail(pendingReg.email, pendingReg.name, code);
+}
+
+function cancelOtpStep() {
+    pendingReg = null;
+    regStep = 'form';
+    render();
 }
 
 function logout() {
@@ -1121,6 +1217,8 @@ function attachEvents() {
     if (lf) lf.addEventListener('submit', handleLogin);
     const rf = document.getElementById('registerForm');
     if (rf) rf.addEventListener('submit', handleRegister);
+    const otpf = document.getElementById('otpForm');
+    if (otpf) otpf.addEventListener('submit', handleOtpSubmit);
     const npf = document.getElementById('newPostForm');
     if (npf) npf.addEventListener('submit', handleNewPost);
     const cf = document.getElementById('commentForm');

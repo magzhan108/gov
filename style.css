@@ -408,6 +408,65 @@ select.form-input {
 
 .auth-switch a:hover { text-decoration: underline; }
 
+/* OTP Verification */
+.otp-input {
+    letter-spacing: 10px;
+    font-size: 1.6rem;
+    font-weight: 700;
+    text-align: center;
+    padding: 12px;
+    color: var(--blue-900);
+    font-family: monospace;
+}
+
+.otp-sub {
+    font-size: 0.85rem;
+    color: var(--gray-600);
+    margin-bottom: 20px;
+    line-height: 1.5;
+}
+
+.otp-sub strong {
+    color: var(--blue-900);
+}
+
+.otp-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 14px;
+    text-align: center;
+}
+
+.otp-resend-btn {
+    background: none;
+    border: none;
+    color: var(--blue-700);
+    font-size: 0.8rem;
+    cursor: pointer;
+    font-weight: 500;
+    padding: 6px;
+    transition: var(--transition);
+}
+
+.otp-resend-btn:hover {
+    color: var(--blue-900);
+    text-decoration: underline;
+}
+
+.otp-back-btn {
+    background: none;
+    border: none;
+    color: var(--gray-500);
+    font-size: 0.8rem;
+    cursor: pointer;
+    padding: 6px;
+}
+
+.otp-back-btn:hover {
+    color: var(--gray-800);
+}
+
 /* ==========================================
    Home — Hero
    ========================================== */
