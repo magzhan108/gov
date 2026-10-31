@@ -64,8 +64,24 @@ function savePosts(p) {
 function getSession() { return load(KEYS.session); }
 function saveSession(s) { save(KEYS.session, s); }
 function clearSession() { localStorage.removeItem(KEYS.session); }
-function currentUser() { const s = getSession(); if (!s) return null; return getUsers().find(u => u.id === s.userId) || null; }
-function isAdmin() { const u = currentUser(); return u && u.role === 'admin'; }
+function currentUser() {
+    const s = getSession();
+    if (!s) return null;
+    let u = getUsers().find(u => u.id === s.userId) || null;
+    if (!u && auth && auth.currentUser && auth.currentUser.uid === s.userId) {
+        u = {
+            id: auth.currentUser.uid,
+            name: auth.currentUser.displayName || auth.currentUser.email.split('@')[0],
+            email: auth.currentUser.email,
+            role: (auth.currentUser.email === 'admin@admin.com') ? 'admin' : 'user'
+        };
+    }
+    return u;
+}
+function isAdmin() {
+    const u = currentUser();
+    return u && (u.role === 'admin' || u.email === 'admin@admin.com');
+}
 
 // ==========================================
 // Utils
@@ -179,7 +195,7 @@ const initialSeedPosts = [
 function seedLocalIfEmpty() {
     let users = getUsers();
     if (!users.find(u => u.email === 'admin@admin.com')) {
-        users.push({ id: 'admin_root', name: 'Әкімшілік', email: 'admin@admin.com', password: 'admin123', role: 'admin', createdAt: new Date().toISOString() });
+        users.push({ id: 'admin_root', name: 'Әкімшілік', email: 'admin@admin.com', role: 'admin', createdAt: new Date().toISOString() });
         saveUsers(users);
     }
     if (getPosts().length === 0) {
@@ -203,12 +219,11 @@ function initFirebaseSync() {
             renderNav();
             if (currentView === 'admin') render();
         } else {
-            // First time setup: seed admin to Firestore
+            // First time setup: seed admin profile to Firestore without hardcoded password
             const adminUser = {
                 id: 'admin_root',
                 name: 'Әкімшілік',
                 email: 'admin@admin.com',
-                password: 'admin123',
                 role: 'admin',
                 createdAt: new Date().toISOString()
             };
@@ -221,6 +236,24 @@ function initFirebaseSync() {
         if (!snapshot.empty) {
             const list = [];
             snapshot.forEach(doc => list.push(doc.data()));
+
+            // Ensure sample news has admin reply if missing
+            const p1 = list.find(p => p.id === 'seed_1');
+            if (p1 && p1.comments) {
+                const c1 = p1.comments.find(c => c.id === 'c1');
+                if (c1 && (!c1.replies || c1.replies.length === 0)) {
+                    c1.replies = [{
+                        id: 'r1',
+                        userId: 'admin_root',
+                        author: 'Әкімшілік',
+                        isAdmin: true,
+                        text: 'Иә, барлық ескі аккаунттар толық сақталады, қайта тіркелудің қажеті жоқ.',
+                        createdAt: new Date(Date.now() - 5400000).toISOString()
+                    }];
+                    db.collection('posts').doc('seed_1').update({ comments: p1.comments }).catch(() => {});
+                }
+            }
+
             savePosts(list);
             if (currentView === 'home') {
                 renderNewsCards(currentFilter, currentSearch);
@@ -557,7 +590,7 @@ function renderPostDetail() {
                                 <div class="reply-body">
                                     <div class="comment-header">
                                         <span class="comment-author">${esc(r.author)}</span>
-                                        ${r.author === 'Әкімшілік' ? '<span class="author-badge">Әкімшілік</span>' : ''}
+                                        ${(r.isAdmin || r.role === 'admin' || r.author === 'Әкімшілік') ? '<span class="author-badge">Әкімшілік</span>' : ''}
                                         ${delRBtn}
                                     </div>
                                     <div class="comment-text">${esc(r.text)}</div>
@@ -585,7 +618,7 @@ function renderPostDetail() {
                     <div class="comment-body">
                         <div class="comment-header">
                             <span class="comment-author">${esc(c.author)}</span>
-                            ${c.author === 'Әкімшілік' ? '<span class="author-badge">Әкімшілік</span>' : ''}
+                            ${(c.isAdmin || c.role === 'admin' || c.author === 'Әкімшілік') ? '<span class="author-badge">Әкімшілік</span>' : ''}
                         </div>
                         <div class="comment-text">${esc(c.text)}</div>
                         <div class="comment-actions">
@@ -950,7 +983,8 @@ function handleComment(e) {
     const post = posts.find(p => p.id === viewData.id);
     if (!post) return;
     if (!post.comments) post.comments = [];
-    const newComment = { id: uid(), userId: user.id, author: user.name, text, replies: [], createdAt: new Date().toISOString() };
+    const isUserAdmin = user.role === 'admin' || user.email === 'admin@admin.com';
+    const newComment = { id: uid(), userId: user.id, author: user.name, isAdmin: isUserAdmin, text, replies: [], createdAt: new Date().toISOString() };
     post.comments.push(newComment);
     savePosts(posts);
     if (db) {
@@ -1021,10 +1055,12 @@ function submitReply(e, postId, commentId) {
     if (!comment) return;
 
     if (!comment.replies) comment.replies = [];
+    const isUserAdmin = user.role === 'admin' || user.email === 'admin@admin.com';
     const newReply = {
         id: uid(),
         userId: user.id,
         author: user.name,
+        isAdmin: isUserAdmin,
         text,
         createdAt: new Date().toISOString()
     };
