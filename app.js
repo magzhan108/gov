@@ -847,9 +847,9 @@ function handleLogin(e) {
 }
 
 const EMAILJS_CONFIG = {
-    serviceId: "service_gov",
-    templateId: "template_gov",
-    publicKey: ""
+    serviceId: "service_k6azeyi",
+    templateId: "template_77l2xf3",
+    publicKey: "5W7FFR2A4cBHoF6Vr"
 };
 
 function sendOtpEmail(email, name, code) {
@@ -857,12 +857,21 @@ function sendOtpEmail(email, name, code) {
         emailjs.init({ publicKey: EMAILJS_CONFIG.publicKey });
         emailjs.send(EMAILJS_CONFIG.serviceId, EMAILJS_CONFIG.templateId, {
             to_email: email,
+            email: email,
             to_name: name,
             otp_code: code,
-            passcode: code
-        }).catch(err => console.warn('EmailJS delivery:', err));
+            passcode: code,
+            code: code,
+            message: `Сіздің порталдағы растау кодыңыз: ${code}`
+        }).then(() => {
+            toast(`Растау коды ${email} поштасына жіберілді! Поштаңызды тексеріңіз.`, 'info');
+        }).catch(err => {
+            console.error('EmailJS қатесі:', err);
+            toast('Хат жіберуде қате болды: EmailJS кілттерін тексеріңіз', 'error');
+        });
+    } else {
+        toast(`EmailJS кілттері орнатылмаған! Код поштаға жетуі үшін кілттерді қосыңыз.`, 'warning');
     }
-    toast(`Растау коды ${email} поштасына жіберілді! (Код: ${code})`, 'info');
 }
 
 function handleRegister(e) {
