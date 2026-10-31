@@ -16,10 +16,12 @@ const firebaseConfig = {
 };
 
 let db = null;
+let auth = null;
 try {
     if (typeof firebase !== 'undefined') {
         firebase.initializeApp(firebaseConfig);
         db = firebase.firestore();
+        auth = firebase.auth();
     }
 } catch (e) {
     console.error('Firebase initialization error:', e);
@@ -42,6 +44,17 @@ function saveUsers(u) {
     save(KEYS.users, u);
 }
 
+function syncUserToLocal(userData) {
+    let users = getUsers();
+    const idx = users.findIndex(u => u.id === userData.id || u.email === userData.email);
+    if (idx >= 0) {
+        users[idx] = Object.assign({}, users[idx], userData);
+    } else {
+        users.push(userData);
+    }
+    saveUsers(users);
+}
+
 function getPosts() { return appPosts; }
 function savePosts(p) {
     appPosts = p;
@@ -59,6 +72,11 @@ function isAdmin() { const u = currentUser(); return u && u.role === 'admin'; }
 // ==========================================
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 function esc(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+
+function countComments(post) {
+    if (!post || !post.comments) return 0;
+    return post.comments.reduce((total, c) => total + 1 + (c.replies ? c.replies.length : 0), 0);
+}
 
 const months = ['қаңтар','ақпан','наурыз','сәуір','мамыр','маусым','шілде','тамыз','қыркүйек','қазан','қараша','желтоқсан'];
 const monthsShort = ['ҚАҢ','АҚП','НАУ','СӘУ','МАМ','МАУ','ШІЛ','ТАМ','ҚЫР','ҚАЗ','ҚАР','ЖЕЛ'];
@@ -97,7 +115,8 @@ const catLabels = {
 // ==========================================
 let currentView = 'home';
 let viewData = {};
-function navigate(view, data = {}) { currentView = view; viewData = data; render(); window.scrollTo(0, 0); }
+let activeReplyCommentId = null;
+function navigate(view, data = {}) { currentView = view; viewData = data; activeReplyCommentId = null; render(); window.scrollTo(0, 0); }
 
 // ==========================================
 // Seed Data
@@ -106,16 +125,23 @@ const initialSeedPosts = [
     {
         id: 'seed_1', userId: 'admin_root', author: 'Әкімшілік', category: 'news',
         title: 'Цифрлық қызметтер порталы жаңартылды',
+        imageUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80',
         content: 'Азаматтарға арналған цифрлық қызметтер порталы толығымен жаңартылды. Жаңа нұсқада 50-ден астам мемлекеттік қызмет онлайн форматта қол жетімді болады.\n\nЖаңартылған портал арқылы азаматтар құжаттарды электронды түрде тапсыра алады, өтініштердің мәртебесін бақылай алады және хабарламалар ала алады.\n\nПортал 2026 жылдың 1 қарашасынан бастап толық көлемде жұмыс істейді.',
         comments: [
-            { id: 'c1', userId: 'g1', author: 'Асқар Нұрланов', text: 'Өте жақсы жаңалық! Сұрақ: ескі аккаунттар сақтала ма?', createdAt: new Date(Date.now() - 7200000).toISOString() },
-            { id: 'c2', userId: 'g2', author: 'Гүлнәр Сериқова', text: 'Мобильді қосымша да жаңартыла ма?', createdAt: new Date(Date.now() - 3600000).toISOString() }
+            {
+                id: 'c1', userId: 'g1', author: 'Асқар Нұрланов', text: 'Өте жақсы жаңалық! Сұрақ: ескі аккаунттар сақтала ма?', createdAt: new Date(Date.now() - 7200000).toISOString(),
+                replies: [
+                    { id: 'r1', userId: 'admin_root', author: 'Әкімшілік', text: 'Иә, барлық ескі аккаунттар толық сақталады, қайта тіркелудің қажеті жоқ.', createdAt: new Date(Date.now() - 5400000).toISOString() }
+                ]
+            },
+            { id: 'c2', userId: 'g2', author: 'Гүлнәр Сериқова', text: 'Мобильді қосымша да жаңартыла ма?', createdAt: new Date(Date.now() - 3600000).toISOString(), replies: [] }
         ],
         createdAt: new Date(Date.now() - 3600000 * 2).toISOString()
     },
     {
         id: 'seed_2', userId: 'admin_root', author: 'Әкімшілік', category: 'decree',
         title: 'Жаңа нормативтік-құқықтық акт қабылданды',
+        imageUrl: 'https://images.unsplash.com/photo-1450133064473-71024230f91b?w=800&auto=format&fit=crop&q=80',
         content: 'Мемлекеттік қызметтерді көрсету тәртібіне өзгерістер енгізу туралы жаңа нормативтік-құқықтық акт қабылданды.\n\nНегізгі өзгерістер:\n- Құжаттарды қарау мерзімі 30 күнге дейін қысқартылды\n- Электронды өтініштер басымдықпен қарастырылады\n- Жаңа шағымдану тетігі енгізілді\n\nАкт 2026 жылдың 15 қарашасынан күшіне енеді.',
         comments: [],
         createdAt: new Date(Date.now() - 3600000 * 24).toISOString()
@@ -123,6 +149,7 @@ const initialSeedPosts = [
     {
         id: 'seed_3', userId: 'admin_root', author: 'Әкімшілік', category: 'event',
         title: 'Халықпен кездесу — 5 қараша',
+        imageUrl: 'https://images.unsplash.com/photo-1511578314322-379afb476865?w=800&auto=format&fit=crop&q=80',
         content: 'Құрметті азаматтар!\n\nМемлекеттік орган басшысының халықпен кездесуі 2026 жылдың 5 қарашасында, сағат 10:00-де өтеді.\n\nОрын: Мемлекеттік қызмет көрсету орталығы, үлкен зал.\n\nКүн тәртібі:\n- Атқарылған жұмыстар туралы есеп\n- Азаматтардың сұрақтарына жауап\n- Келешек жоспарлар\n\nБарлығын қатысуға шақырамыз!',
         comments: [
             { id: 'c3', userId: 'g3', author: 'Марат Қасымов', text: 'Онлайн трансляция болады ма?', createdAt: new Date(Date.now() - 43200000).toISOString() }
@@ -132,6 +159,7 @@ const initialSeedPosts = [
     {
         id: 'seed_4', userId: 'admin_root', author: 'Әкімшілік', category: 'announce',
         title: 'Бос лауазымдық орындарға конкурс жарияланды',
+        imageUrl: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=800&auto=format&fit=crop&q=80',
         content: 'Мемлекеттік органда бос лауазымдық орындарға конкурс жарияланады:\n\n1. Бас маман — 2 орын\n2. Жетекші маман — 3 орын\n3. Кеңесші — 1 орын\n\nТалаптар: жоғары білім, мемлекеттік тілді білу, компьютерлік сауаттылық.\n\nҚұжат қабылдау мерзімі: 2026 жылдың 1-15 қарашасы.\n\nТолық ақпарат: hr@gov.kz',
         comments: [],
         createdAt: new Date(Date.now() - 3600000 * 72).toISOString()
@@ -139,6 +167,7 @@ const initialSeedPosts = [
     {
         id: 'seed_5', userId: 'admin_root', author: 'Әкімшілік', category: 'press',
         title: 'Баспасөз мәлімдемесі: Аймақ дамуының қорытындысы',
+        imageUrl: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&auto=format&fit=crop&q=80',
         content: 'Биылғы жылдың 9 айында аймақ дамуында оңтайлы нәтижелер тіркелді:\n\n- Жалпы өңірлік өнім 8,5%-ға өсті\n- 1200 жаңа жұмыс орны құрылды\n- 15 инвестициялық жоба іске қосылды\n- Орташа жалақы 15%-ға артты\n\nМемлекеттік орган аймақ экономикасын дамыту бағытында жұмысын жалғастыруда.',
         comments: [
             { id: 'c4', userId: 'g4', author: 'Алия Бекмұратова', text: 'Толық статистикалық деректерді қайдан көруге болады?', createdAt: new Date(Date.now() - 86400000).toISOString() }
@@ -205,6 +234,28 @@ function initFirebaseSync() {
             });
         }
     }, err => console.warn('Firestore posts error:', err));
+
+    // 3. Auth listener
+    if (auth) {
+        auth.onAuthStateChanged(firebaseUser => {
+            if (firebaseUser) {
+                saveSession({ userId: firebaseUser.uid });
+                let u = getUsers().find(x => x.id === firebaseUser.uid);
+                if (!u) {
+                    const userData = {
+                        id: firebaseUser.uid,
+                        name: firebaseUser.displayName || firebaseUser.email.split('@')[0],
+                        email: firebaseUser.email,
+                        role: firebaseUser.email === 'admin@admin.com' ? 'admin' : 'user',
+                        createdAt: new Date().toISOString()
+                    };
+                    syncUserToLocal(userData);
+                }
+            }
+            renderTopBar();
+            renderNav();
+        });
+    }
 }
 
 // ==========================================
@@ -264,6 +315,14 @@ function renderLogin() {
             <div class="auth-card">
                 <h1 class="auth-title">Жүйеге кіру</h1>
                 <p class="auth-sub">Пікір қалдыру үшін аккаунтыңызға кіріңіз</p>
+
+                <button type="button" class="btn btn-google" onclick="handleGoogleSignIn()">
+                    <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+                    Google арқылы кіру
+                </button>
+
+                <div class="auth-divider"><span>немесе email арқылы</span></div>
+
                 <form id="loginForm">
                     <div class="form-group">
                         <label class="form-label">Email</label>
@@ -287,6 +346,14 @@ function renderRegister() {
             <div class="auth-card">
                 <h1 class="auth-title">Тіркелу</h1>
                 <p class="auth-sub">Жаңа аккаунт жасап, пікір қалдырыңыз</p>
+
+                <button type="button" class="btn btn-google" onclick="handleGoogleSignIn()">
+                    <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+                    Google арқылы кіру
+                </button>
+
+                <div class="auth-divider"><span>немесе email арқылы</span></div>
+
                 <form id="registerForm">
                     <div class="form-group">
                         <label class="form-label">Аты-жөні</label>
@@ -371,6 +438,20 @@ function renderHome() {
                             <label class="form-label">Мазмұны</label>
                             <textarea class="form-input" id="npContent" placeholder="Жаңалықтың толық мәтіні..." required maxlength="5000" rows="8"></textarea>
                         </div>
+                        <div class="form-group">
+                            <label class="form-label">Фотосурет қосу (міндетті емес)</label>
+                            <div class="image-upload-wrap">
+                                <label for="npImageFile" class="image-upload-btn">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                                    Құрылғыдан фото таңдау
+                                </label>
+                                <input type="file" id="npImageFile" accept="image/*" style="display:none" onchange="handleImageSelect(event)">
+                                <div id="imagePreviewContainer" class="image-preview-box" style="display:none">
+                                    <img id="imagePreview" src="" alt="Алдын ала көру">
+                                    <button type="button" class="image-remove-btn" onclick="removeSelectedImage()">✕ Өшіру</button>
+                                </div>
+                            </div>
+                        </div>
                         <button type="submit" class="btn" style="margin-top:8px">Жариялау</button>
                     </form>
                 </div>
@@ -398,13 +479,19 @@ function renderNewsCards(filter = 'all', search = '') {
     if (empty) empty.style.display = 'none';
 
     list.innerHTML = posts.map(p => {
-        const cc = p.comments ? p.comments.length : 0;
+        const cc = countComments(p);
         return `
-            <article class="news-card" onclick="navigate('post', {id:'${p.id}'})">
-                <div class="news-date-block">
-                    <div class="news-date-day">${dateDay(p.createdAt)}</div>
-                    <div class="news-date-month">${dateMonthShort(p.createdAt)}</div>
-                </div>
+            <article class="news-card ${p.imageUrl ? 'has-image' : ''}" onclick="navigate('post', {id:'${p.id}'})">
+                ${p.imageUrl ? `
+                    <div class="news-thumb">
+                        <img src="${p.imageUrl}" alt="${esc(p.title)}" loading="lazy">
+                    </div>
+                ` : `
+                    <div class="news-date-block">
+                        <div class="news-date-day">${dateDay(p.createdAt)}</div>
+                        <div class="news-date-month">${dateMonthShort(p.createdAt)}</div>
+                    </div>
+                `}
                 <div class="news-body">
                     <span class="news-badge badge-${p.category}">${catLabels[p.category]}</span>
                     <h2 class="news-title">${esc(p.title)}</h2>
@@ -454,16 +541,63 @@ function renderPostDetail() {
             const ci = initials(c.author);
             const canDel = user && (user.role === 'admin' || user.id === c.userId);
             const delBtn = canDel ? `<button class="comment-delete" onclick="deleteComment('${post.id}','${c.id}'); event.stopPropagation();">жою</button>` : '';
+            const replies = c.replies || [];
+            const isReplying = activeReplyCommentId === c.id;
+
+            const repliesHtml = replies.length > 0 ? `
+                <div class="replies-list">
+                    ${replies.map(r => {
+                        const rc = avatarColor(r.author);
+                        const ri = initials(r.author);
+                        const canDelR = user && (user.role === 'admin' || user.id === r.userId);
+                        const delRBtn = canDelR ? `<button class="comment-delete" onclick="deleteReply('${post.id}','${c.id}','${r.id}'); event.stopPropagation();">жою</button>` : '';
+                        return `
+                            <div class="reply-item">
+                                <div class="reply-avatar" style="background:${rc}">${ri}</div>
+                                <div class="reply-body">
+                                    <div class="comment-header">
+                                        <span class="comment-author">${esc(r.author)}</span>
+                                        ${r.author === 'Әкімшілік' ? '<span class="author-badge">Әкімшілік</span>' : ''}
+                                        ${delRBtn}
+                                    </div>
+                                    <div class="comment-text">${esc(r.text)}</div>
+                                    <div class="comment-time">${timeAgo(r.createdAt)}</div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            ` : '';
+
+            const replyFormHtml = isReplying ? `
+                <form class="reply-form" onsubmit="submitReply(event, '${post.id}', '${c.id}')">
+                    <textarea class="form-input" id="replyInput_${c.id}" placeholder="${esc(c.author)} пікіріне жауап жазыңыз..." required maxlength="1000" rows="2"></textarea>
+                    <div class="reply-form-actions">
+                        <button type="button" class="btn btn-sm btn-subtle" onclick="cancelReply()">Болдырмау</button>
+                        <button type="submit" class="btn btn-sm">Жауап беру</button>
+                    </div>
+                </form>
+            ` : '';
+
             return `
                 <div class="comment-item">
                     <div class="comment-avatar" style="background:${cc}">${ci}</div>
                     <div class="comment-body">
                         <div class="comment-header">
                             <span class="comment-author">${esc(c.author)}</span>
-                            ${delBtn}
+                            ${c.author === 'Әкімшілік' ? '<span class="author-badge">Әкімшілік</span>' : ''}
                         </div>
                         <div class="comment-text">${esc(c.text)}</div>
-                        <div class="comment-time">${timeAgo(c.createdAt)}</div>
+                        <div class="comment-actions">
+                            <span class="comment-time">${timeAgo(c.createdAt)}</span>
+                            <button class="comment-reply-btn" onclick="openReplyForm('${c.id}')">
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+                                Жауап беру
+                            </button>
+                            ${delBtn}
+                        </div>
+                        ${replyFormHtml}
+                        ${repliesHtml}
                     </div>
                 </div>`;
         }).join('')
@@ -477,6 +611,11 @@ function renderPostDetail() {
             </button>
 
             <div class="detail-card">
+                ${post.imageUrl ? `
+                    <div class="detail-image-wrap">
+                        <img src="${post.imageUrl}" class="detail-image" alt="${esc(post.title)}">
+                    </div>
+                ` : ''}
                 <div class="detail-badge">
                     <span class="news-badge badge-${post.category}">${catLabels[post.category]}</span>
                 </div>
@@ -493,7 +632,7 @@ function renderPostDetail() {
 
             <div class="comments-card">
                 <div class="comments-title">
-                    Азаматтар пікірлері <span class="comments-count">${comments.length}</span>
+                    Азаматтар пікірлері <span class="comments-count">${countComments(post)}</span>
                 </div>
                 ${commentForm}
                 <div class="comments-list">${commentsHtml}</div>
@@ -508,7 +647,7 @@ function renderAdmin() {
     if (!isAdmin()) { navigate('home'); return ''; }
     const users = getUsers();
     const posts = getPosts();
-    let tc = 0; posts.forEach(p => tc += (p.comments ? p.comments.length : 0));
+    let tc = 0; posts.forEach(p => tc += countComments(p));
     const tab = viewData.tab || 'posts';
 
     let tabContent = '';
@@ -522,7 +661,7 @@ function renderAdmin() {
                     <tr>
                         <td class="td-title">${esc(p.title)}</td>
                         <td><span class="news-badge badge-${p.category}">${catLabels[p.category]}</span></td>
-                        <td>${p.comments ? p.comments.length : 0}</td>
+                        <td>${countComments(p)}</td>
                         <td>${formatDate(p.createdAt)}</td>
                         <td class="td-actions">
                             <button class="admin-btn-sm" onclick="navigate('post', {id:'${p.id}'})">Көру</button>
@@ -566,16 +705,87 @@ function renderAdmin() {
 // ==========================================
 // Actions
 // ==========================================
+function handleGoogleSignIn() {
+    if (!auth) {
+        toast('Firebase қосылмаған', 'error');
+        return;
+    }
+    const provider = new firebase.auth.GoogleAuthProvider();
+    auth.signInWithPopup(provider).then(result => {
+        const u = result.user;
+        const isAdminUser = u.email === 'admin@admin.com';
+        const userData = {
+            id: u.uid,
+            name: u.displayName || u.email.split('@')[0],
+            email: u.email,
+            role: isAdminUser ? 'admin' : 'user',
+            createdAt: new Date().toISOString()
+        };
+
+        if (db) {
+            db.collection('users').doc(u.uid).get().then(doc => {
+                if (!doc.exists) {
+                    db.collection('users').doc(u.uid).set(userData).catch(console.error);
+                } else {
+                    const existing = doc.data();
+                    userData.role = existing.role || userData.role;
+                }
+                saveSession({ userId: u.uid });
+                syncUserToLocal(userData);
+                toast('Google арқылы сәтті кірдіңіз!', 'success');
+                navigate('home');
+            }).catch(() => {
+                saveSession({ userId: u.uid });
+                syncUserToLocal(userData);
+                toast('Google арқылы сәтті кірдіңіз!', 'success');
+                navigate('home');
+            });
+        } else {
+            saveSession({ userId: u.uid });
+            syncUserToLocal(userData);
+            toast('Google арқылы сәтті кірдіңіз!', 'success');
+            navigate('home');
+        }
+    }).catch(err => {
+        console.error('Google Sign In error:', err);
+        if (err.code === 'auth/popup-closed-by-user') return;
+        if (err.code === 'auth/unauthorized-domain') {
+            toast('Firebase-те доменді Authorized domains-ке қосыңыз', 'error');
+            return;
+        }
+        toast('Google қатесі: ' + (err.message || err.code), 'error');
+    });
+}
+
 function handleLogin(e) {
     e.preventDefault();
     const email = document.getElementById('loginEmail').value.trim();
     const pass = document.getElementById('loginPass').value;
     const err = document.getElementById('loginError');
-    const user = getUsers().find(u => u.email === email && u.password === pass);
-    if (!user) { err.textContent = 'Email немесе құпия сөз қате'; return; }
-    saveSession({ userId: user.id });
-    toast('Сәтті кірдіңіз!', 'success');
-    navigate('home');
+
+    if (auth) {
+        auth.signInWithEmailAndPassword(email, pass).then(result => {
+            const u = result.user;
+            saveSession({ userId: u.uid });
+            toast('Сәтті кірдіңіз!', 'success');
+            navigate('home');
+        }).catch(() => {
+            const localUser = getUsers().find(u => u.email === email && u.password === pass);
+            if (localUser) {
+                saveSession({ userId: localUser.id });
+                toast('Сәтті кірдіңіз!', 'success');
+                navigate('home');
+            } else {
+                err.textContent = 'Email немесе құпия сөз қате';
+            }
+        });
+    } else {
+        const user = getUsers().find(u => u.email === email && u.password === pass);
+        if (!user) { err.textContent = 'Email немесе құпия сөз қате'; return; }
+        saveSession({ userId: user.id });
+        toast('Сәтті кірдіңіз!', 'success');
+        navigate('home');
+    }
 }
 
 function handleRegister(e) {
@@ -587,23 +797,105 @@ function handleRegister(e) {
     const err = document.getElementById('regError');
     if (pass !== pass2) { err.textContent = 'Құпия сөздер сәйкес келмейді'; return; }
     if (pass.length < 6) { err.textContent = 'Кемінде 6 таңба қажет'; return; }
-    const users = getUsers();
-    if (users.find(u => u.email === email)) { err.textContent = 'Бұл email тіркелген'; return; }
-    const u = { id: uid(), name, email, password: pass, role: 'user', createdAt: new Date().toISOString() };
-    users.push(u);
-    saveUsers(users);
-    if (db) {
-        db.collection('users').doc(u.id).set(u).catch(console.error);
+
+    if (auth) {
+        auth.createUserWithEmailAndPassword(email, pass).then(result => {
+            const u = result.user;
+            u.updateProfile({ displayName: name }).catch(console.error);
+            const userData = {
+                id: u.uid,
+                name: name,
+                email: email,
+                role: email === 'admin@admin.com' ? 'admin' : 'user',
+                createdAt: new Date().toISOString()
+            };
+            if (db) {
+                db.collection('users').doc(u.uid).set(userData).catch(console.error);
+            }
+            saveSession({ userId: u.uid });
+            syncUserToLocal(userData);
+            toast('Тіркелу сәтті аяқталды!', 'success');
+            navigate('home');
+        }).catch(fbErr => {
+            if (fbErr.code === 'auth/email-already-in-use') {
+                err.textContent = 'Бұл email тіркелген';
+            } else {
+                err.textContent = fbErr.message || 'Тіркелу қатесі';
+            }
+        });
+    } else {
+        const users = getUsers();
+        if (users.find(u => u.email === email)) { err.textContent = 'Бұл email тіркелген'; return; }
+        const u = { id: uid(), name, email, password: pass, role: 'user', createdAt: new Date().toISOString() };
+        users.push(u);
+        saveUsers(users);
+        saveSession({ userId: u.id });
+        toast('Тіркелу сәтті аяқталды!', 'success');
+        navigate('home');
     }
-    saveSession({ userId: u.id });
-    toast('Тіркелу сәтті аяқталды!', 'success');
-    navigate('home');
 }
 
 function logout() {
+    if (auth && auth.currentUser) {
+        auth.signOut().catch(console.error);
+    }
     clearSession();
     toast('Жүйеден шықтыңыз', 'info');
     navigate('home');
+}
+
+let currentSelectedImageBase64 = '';
+
+function handleImageSelect(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+        toast('Тек сурет файлдарын таңдаңыз', 'error');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+        const img = new Image();
+        img.onload = function() {
+            const maxDim = 900;
+            let w = img.width;
+            let h = img.height;
+            if (w > maxDim || h > maxDim) {
+                if (w > h) {
+                    h = Math.round((h * maxDim) / w);
+                    w = maxDim;
+                } else {
+                    w = Math.round((w * maxDim) / h);
+                    h = maxDim;
+                }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+            currentSelectedImageBase64 = canvas.toDataURL('image/jpeg', 0.75);
+
+            const preview = document.getElementById('imagePreview');
+            const box = document.getElementById('imagePreviewContainer');
+            if (preview && box) {
+                preview.src = currentSelectedImageBase64;
+                box.style.display = 'block';
+            }
+        };
+        img.src = evt.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+function removeSelectedImage() {
+    currentSelectedImageBase64 = '';
+    const fileInput = document.getElementById('npImageFile');
+    if (fileInput) fileInput.value = '';
+    const box = document.getElementById('imagePreviewContainer');
+    if (box) box.style.display = 'none';
 }
 
 function openNewPost() {
@@ -614,6 +906,7 @@ function openNewPost() {
 function closeNewPost() {
     const m = document.getElementById('newPostModal');
     if (m) m.classList.remove('active');
+    removeSelectedImage();
 }
 
 function handleNewPost(e) {
@@ -625,12 +918,23 @@ function handleNewPost(e) {
     const content = document.getElementById('npContent').value.trim();
     if (!title || !cat || !content) return;
     const posts = getPosts();
-    const newPost = { id: uid(), userId: user.id, author: user.name, title, category: cat, content, comments: [], createdAt: new Date().toISOString() };
+    const newPost = {
+        id: uid(),
+        userId: user.id,
+        author: user.name,
+        title,
+        category: cat,
+        content,
+        imageUrl: currentSelectedImageBase64 || '',
+        comments: [],
+        createdAt: new Date().toISOString()
+    };
     posts.unshift(newPost);
     savePosts(posts);
     if (db) {
         db.collection('posts').doc(newPost.id).set(newPost).catch(console.error);
     }
+    removeSelectedImage();
     closeNewPost();
     toast('Жаңалық жарияланды!', 'success');
     navigate('home');
@@ -646,7 +950,7 @@ function handleComment(e) {
     const post = posts.find(p => p.id === viewData.id);
     if (!post) return;
     if (!post.comments) post.comments = [];
-    const newComment = { id: uid(), userId: user.id, author: user.name, text, createdAt: new Date().toISOString() };
+    const newComment = { id: uid(), userId: user.id, author: user.name, text, replies: [], createdAt: new Date().toISOString() };
     post.comments.push(newComment);
     savePosts(posts);
     if (db) {
@@ -678,6 +982,85 @@ function deleteComment(postId, commentId) {
     }
     toast('Пікір жойылды', 'info');
     navigate('post', { id: postId });
+}
+
+function openReplyForm(commentId) {
+    if (!currentUser()) {
+        toast('Жауап беру үшін алдымен кіріңіз немесе тіркеліңіз', 'info');
+        navigate('login');
+        return;
+    }
+    activeReplyCommentId = activeReplyCommentId === commentId ? null : commentId;
+    render();
+    if (activeReplyCommentId) {
+        setTimeout(() => {
+            const input = document.getElementById(`replyInput_${commentId}`);
+            if (input) input.focus();
+        }, 50);
+    }
+}
+
+function cancelReply() {
+    activeReplyCommentId = null;
+    render();
+}
+
+function submitReply(e, postId, commentId) {
+    e.preventDefault();
+    const user = currentUser();
+    if (!user) return;
+    const input = document.getElementById(`replyInput_${commentId}`);
+    if (!input) return;
+    const text = input.value.trim();
+    if (!text) return;
+
+    const posts = getPosts();
+    const post = posts.find(p => p.id === postId);
+    if (!post || !post.comments) return;
+    const comment = post.comments.find(c => c.id === commentId);
+    if (!comment) return;
+
+    if (!comment.replies) comment.replies = [];
+    const newReply = {
+        id: uid(),
+        userId: user.id,
+        author: user.name,
+        text,
+        createdAt: new Date().toISOString()
+    };
+    comment.replies.push(newReply);
+    savePosts(posts);
+
+    if (db) {
+        db.collection('posts').doc(post.id).update({
+            comments: post.comments
+        }).catch(console.error);
+    }
+
+    activeReplyCommentId = null;
+    toast('Жауабыңыз қосылды!', 'success');
+    render();
+}
+
+function deleteReply(postId, commentId, replyId) {
+    if (!confirm('Бұл жауапты жойғыңыз келе ме?')) return;
+    const posts = getPosts();
+    const post = posts.find(p => p.id === postId);
+    if (!post || !post.comments) return;
+    const comment = post.comments.find(c => c.id === commentId);
+    if (!comment || !comment.replies) return;
+
+    comment.replies = comment.replies.filter(r => r.id !== replyId);
+    savePosts(posts);
+
+    if (db) {
+        db.collection('posts').doc(post.id).update({
+            comments: post.comments
+        }).catch(console.error);
+    }
+
+    toast('Жауап жойылды', 'info');
+    render();
 }
 
 function deleteUser(userId) {
