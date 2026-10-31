@@ -383,6 +383,11 @@ function renderRegister() {
                     <h1 class="auth-title">Поштаны растау</h1>
                     <p class="otp-sub">Біз <strong>${esc(pendingReg.email)}</strong> поштасына 6 сандық растау кодын жібердік. Кодты енгізіңіз:</p>
 
+                    <div class="otp-spam-note">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <span><strong>Ескерту:</strong> Растау хаты поштаңыздың <strong>«Спам» (Spam)</strong> немесе «Жарнамалар» бөлімінде болуы мүмкін. Хат келмесе, спамды міндетті түрде тексеріңіз.</span>
+                    </div>
+
                     <form id="otpForm">
                         <div class="form-group">
                             <input type="text" class="form-input otp-input" id="otpCode" placeholder="••••••" maxlength="6" pattern="[0-9]{6}" inputmode="numeric" required autofocus autocomplete="one-time-code">
@@ -864,7 +869,7 @@ function sendOtpEmail(email, name, code) {
             code: code,
             message: `Сіздің порталдағы растау кодыңыз: ${code}`
         }).then(() => {
-            toast(`Растау коды ${email} поштасына жіберілді! Поштаңызды тексеріңіз.`, 'info');
+            toast(`Растау коды ${email} поштасына жіберілді! («Спам» бумасын да тексеріңіз)`, 'info');
         }).catch(err => {
             console.error('EmailJS қатесі:', err);
             toast('Хат жіберуде қате болды: EmailJS кілттерін тексеріңіз', 'error');
