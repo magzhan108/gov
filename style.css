@@ -143,12 +143,20 @@ a { color: inherit; text-decoration: none; }
 }
 
 .logo-emblem {
-    width: 42px;
-    height: 42px;
+    width: 46px;
+    height: 46px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--blue-900);
+    flex-shrink: 0;
+}
+
+.logo-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: 50%;
+    display: block;
 }
 
 .logo-text { display: flex; flex-direction: column; }
